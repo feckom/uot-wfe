@@ -1,0 +1,4 @@
+flask
+argostranslate
+requests
+psutil

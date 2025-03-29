@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Universal Offline Translator</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>Universal Offline Translator</h1>
+        
+        <div class="translator-box">
+            <div class="language-selectors">
+                <select id="from-lang" onchange="updateTargetLanguages()">
+                    {% for lang in all_languages %}
+                    <option value="{{ lang }}" {% if lang == 'en' %}selected{% endif %}>{{ lang }}</option>
+                    {% endfor %}
+                </select>
+                <button id="swap-langs" title="Swap languages">⇄</button>
+                <select id="to-lang">
+                    <!-- Will be populated dynamically -->
+                </select>
+            </div>
+            
+            <div class="text-areas">
+                <textarea id="source-text" placeholder="Enter text to translate..."></textarea>
+                <textarea id="translated-text" placeholder="Translation will appear here..." readonly></textarea>
+            </div>
+            
+            <button id="translate-btn">Translate</button>
+        </div>
+        
+        <div class="language-info">
+            <h3>Available Language Pairs:</h3>
+            <div id="language-pairs-display"></div>
+        </div>
+    </div>
+
+    <script>
+        // Store the language pairs from server
+        const languagePairs = {{ language_pairs|safe }};
+        
+        function populateTargetLanguages(sourceLang) {
+            const toLangSelect = document.getElementById('to-lang');
+            toLangSelect.innerHTML = '';
+            
+            if (languagePairs[sourceLang]) {
+                languagePairs[sourceLang].forEach(lang => {
+                    const option = document.createElement('option');
+                    option.value = lang;
+                    option.textContent = lang;
+                    toLangSelect.appendChild(option);
+                });
+                
+                // Default to first available target language
+                if (languagePairs[sourceLang].length > 0) {
+                    toLangSelect.value = languagePairs[sourceLang][0];
+                }
+            }
+        }
+        
+        function updateTargetLanguages() {
+            const fromLang = document.getElementById('from-lang').value;
+            populateTargetLanguages(fromLang);
+        }
+        
+        function displayLanguagePairs() {
+            const displayDiv = document.getElementById('language-pairs-display');
+            let html = '<ul>';
+            
+            for (const [source, targets] of Object.entries(languagePairs)) {
+                html += `<li><strong>${source}</strong> → ${targets.join(', ')}</li>`;
+            }
+            
+            html += '</ul>';
+            displayDiv.innerHTML = html;
+        }
+        
+        document.addEventListener('DOMContentLoaded', function() {
+            // Initial setup
+            populateTargetLanguages(document.getElementById('from-lang').value);
+            displayLanguagePairs();
+            
+            const translateBtn = document.getElementById('translate-btn');
+            const sourceText = document.getElementById('source-text');
+            const translatedText = document.getElementById('translated-text');
+            const swapBtn = document.getElementById('swap-langs');
+            
+            translateBtn.addEventListener('click', async function() {
+                const text = sourceText.value.trim();
+                if (!text) {
+                    alert('Please enter some text to translate');
+                    return;
+                }
+                
+                translatedText.value = "Translating...";
+                
+                try {
+                    const response = await fetch('/translate', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            text: text,
+                            from: document.getElementById('from-lang').value,
+                            to: document.getElementById('to-lang').value
+                        })
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (data.error) {
+                        translatedText.value = data.error;
+                    } else {
+                        translatedText.value = data.translation;
+                    }
+                } catch (error) {
+                    translatedText.value = "Translation failed: " + error.message;
+                }
+            });
+            
+            swapBtn.addEventListener('click', function() {
+                const fromLang = document.getElementById('from-lang');
+                const toLang = document.getElementById('to-lang');
+                const temp = fromLang.value;
+                
+                // Only swap if the target language is a valid source
+                if (languagePairs[toLang.value]) {
+                    fromLang.value = toLang.value;
+                    populateTargetLanguages(toLang.value);
+                    toLang.value = temp;
+                    
+                    // Also swap text if there's content
+                    if (sourceText.value || translatedText.value) {
+                        const tempText = sourceText.value;
+                        sourceText.value = translatedText.value;
+                        translatedText.value = tempText;
+                    }
+                } else {
+                    alert("Cannot swap - no translation available for this direction");
+                }
+            });
+        });
+    </script>
+</body>
+</html>
