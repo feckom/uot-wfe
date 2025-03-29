@@ -9,7 +9,6 @@
 <body>
     <div class="container">
         <h1>Universal Offline Translator</h1>
-        
         <div class="translator-box">
             <div class="language-selectors">
                 <select id="from-lang" onchange="updateTargetLanguages()">
@@ -22,29 +21,29 @@
                     <!-- Will be populated dynamically -->
                 </select>
             </div>
-            
             <div class="text-areas">
                 <textarea id="source-text" placeholder="Enter text to translate..."></textarea>
                 <textarea id="translated-text" placeholder="Translation will appear here..." readonly></textarea>
             </div>
-            
+            <div class="options">
+                <label class="checkbox-container">
+                    <input type="checkbox" id="interactive-mode" title="Shows detailed logs during translation">
+                    <span class="checkbox-label">Interactive mode (-i)</span>
+                </label>
+            </div>
             <button id="translate-btn">Translate</button>
         </div>
-        
-        <div class="language-info">
-            <h3>Available Language Pairs:</h3>
-            <div id="language-pairs-display"></div>
+        <div class="logs-container" id="logs-container" style="display: none;">
+            <h3>Translation Logs</h3>
+            <div id="logs-content" class="logs-content"></div>
         </div>
     </div>
-
     <script>
         // Store the language pairs from server
         const languagePairs = {{ language_pairs|safe }};
-        
         function populateTargetLanguages(sourceLang) {
             const toLangSelect = document.getElementById('to-lang');
             toLangSelect.innerHTML = '';
-            
             if (languagePairs[sourceLang]) {
                 languagePairs[sourceLang].forEach(lang => {
                     const option = document.createElement('option');
@@ -52,40 +51,55 @@
                     option.textContent = lang;
                     toLangSelect.appendChild(option);
                 });
-                
                 // Default to first available target language
                 if (languagePairs[sourceLang].length > 0) {
                     toLangSelect.value = languagePairs[sourceLang][0];
                 }
             }
         }
-        
         function updateTargetLanguages() {
             const fromLang = document.getElementById('from-lang').value;
             populateTargetLanguages(fromLang);
         }
         
-        function displayLanguagePairs() {
-            const displayDiv = document.getElementById('language-pairs-display');
-            let html = '<ul>';
+        // Log message function
+        function addLog(message) {
+            const logsContainer = document.getElementById('logs-container');
+            const logsContent = document.getElementById('logs-content');
             
-            for (const [source, targets] of Object.entries(languagePairs)) {
-                html += `<li><strong>${source}</strong> → ${targets.join(', ')}</li>`;
-            }
+            // Show logs container if not already visible
+            logsContainer.style.display = 'block';
             
-            html += '</ul>';
-            displayDiv.innerHTML = html;
+            // Add timestamp to log message
+            const now = new Date();
+            const timestamp = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
+            
+            // Create log entry
+            const logEntry = document.createElement('div');
+            logEntry.className = 'log-entry';
+            logEntry.innerHTML = `<span class="log-timestamp">[${timestamp}]</span> ${message}`;
+            
+            // Add to logs
+            logsContent.appendChild(logEntry);
+            
+            // Scroll to bottom of logs
+            logsContent.scrollTop = logsContent.scrollHeight;
+        }
+        
+        // Clear logs function
+        function clearLogs() {
+            const logsContent = document.getElementById('logs-content');
+            logsContent.innerHTML = '';
         }
         
         document.addEventListener('DOMContentLoaded', function() {
             // Initial setup
             populateTargetLanguages(document.getElementById('from-lang').value);
-            displayLanguagePairs();
-            
             const translateBtn = document.getElementById('translate-btn');
             const sourceText = document.getElementById('source-text');
             const translatedText = document.getElementById('translated-text');
             const swapBtn = document.getElementById('swap-langs');
+            const interactiveModeCheckbox = document.getElementById('interactive-mode');
             
             translateBtn.addEventListener('click', async function() {
                 const text = sourceText.value.trim();
@@ -94,9 +108,26 @@
                     return;
                 }
                 
+                // Clear previous logs if interactive mode is enabled
+                if (interactiveModeCheckbox.checked) {
+                    clearLogs();
+                    addLog("[INFO] Starting translation...");
+                    addLog(`[INFO] Looking for translation path: ${document.getElementById('from-lang').value} → ${document.getElementById('to-lang').value}`);
+                } else {
+                    // Hide logs container if interactive mode is disabled
+                    document.getElementById('logs-container').style.display = 'none';
+                }
+                
                 translatedText.value = "Translating...";
                 
                 try {
+                    // Get start time for performance measurement
+                    const startTime = performance.now();
+                    
+                    if (interactiveModeCheckbox.checked) {
+                        addLog(`[INFO] Translating: '${text}'`);
+                    }
+                    
                     const response = await fetch('/translate', {
                         method: 'POST',
                         headers: {
@@ -105,19 +136,51 @@
                         body: JSON.stringify({
                             text: text,
                             from: document.getElementById('from-lang').value,
-                            to: document.getElementById('to-lang').value
+                            to: document.getElementById('to-lang').value,
+                            interactive: interactiveModeCheckbox.checked
                         })
                     });
                     
                     const data = await response.json();
                     
+                                            // Get end time and calculate elapsed time
+                    const endTime = performance.now();
+                    const elapsedTime = ((endTime - startTime) / 1000).toFixed(2);
+                    
                     if (data.error) {
                         translatedText.value = data.error;
+                        if (interactiveModeCheckbox.checked) {
+                            addLog(`[ERROR] ${data.error}`);
+                        }
                     } else {
                         translatedText.value = data.translation;
+                        if (interactiveModeCheckbox.checked) {
+                            addLog(`[INFO] Translation completed successfully`);
+                            
+                            // Use the exact format from your Python script's log output
+                            let memoryLine = `[INFO] Translation took ${elapsedTime} seconds`;
+                            
+                            // If we're running in Firefox, we can get an estimate of memory usage
+                            if (window.performance && window.performance.memory) {
+                                const memoryMB = Math.round(window.performance.memory.usedJSHeapSize / (1024 * 1024));
+                                memoryLine += `, uses ${memoryMB} MB RAM`;
+                            }
+                            
+                            addLog(memoryLine);
+                            
+                            // Add logs if they were returned from the server
+                            if (data.logs && Array.isArray(data.logs)) {
+                                data.logs.forEach(log => {
+                                    addLog(log);
+                                });
+                            }
+                        }
                     }
                 } catch (error) {
                     translatedText.value = "Translation failed: " + error.message;
+                    if (interactiveModeCheckbox.checked) {
+                        addLog(`[ERROR] Translation failed: ${error.message}`);
+                    }
                 }
             });
             
@@ -125,13 +188,11 @@
                 const fromLang = document.getElementById('from-lang');
                 const toLang = document.getElementById('to-lang');
                 const temp = fromLang.value;
-                
                 // Only swap if the target language is a valid source
                 if (languagePairs[toLang.value]) {
                     fromLang.value = toLang.value;
                     populateTargetLanguages(toLang.value);
                     toLang.value = temp;
-                    
                     // Also swap text if there's content
                     if (sourceText.value || translatedText.value) {
                         const tempText = sourceText.value;
